@@ -2,6 +2,7 @@ package main
 
 import (
 	"math/rand"
+	"strconv"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -23,6 +24,14 @@ type Sticker struct {
 	app         fyne.App
 }
 
+type CreateButton struct {
+	widget.BaseWidget
+	Image         *canvas.Image
+	onTapped      func()
+	app           fyne.App
+	noteContainer *fyne.Container
+}
+
 func newSticker(app fyne.App, note Note, imagePath string, startX, startY float32) *Sticker {
 	s := &Sticker{X: startX, Y: startY, app: app, Note: note}
 	s.ExtendBaseWidget(s)
@@ -34,6 +43,65 @@ func newSticker(app fyne.App, note Note, imagePath string, startX, startY float3
 	s.Move(fyne.NewPos(s.X, s.Y))
 
 	return s
+}
+
+func newCreateButton(app fyne.App) *CreateButton {
+	cb := &CreateButton{
+		Image: canvas.NewImageFromFile("createNote.png"),
+		app:   app,
+	}
+
+	cb.Image.FillMode = canvas.ImageFillContain
+
+	cb.ExtendBaseWidget(cb)
+
+	cb.Resize(fyne.NewSize(80, 80))
+	cb.Move(fyne.NewPos(50, 50))
+
+	return cb
+}
+
+func openCreateNoteWindow(cb *CreateButton, noteContainer *fyne.Container) {
+	wToCreateNote := cb.app.NewWindow("форма")
+	wToCreateNote.Resize(fyne.NewSize(500, 700))
+
+	bg := canvas.NewImageFromFile("bg.png")
+	bg.FillMode = canvas.ImageFillStretch
+
+	textEntry := widget.NewEntry()
+	textEntry.SetPlaceHolder("Введите текст заметки")
+
+	deadlineEntry := widget.NewEntry()
+	deadlineEntry.SetPlaceHolder("Дедлайн замекти (кол-во минут)")
+
+	create := widget.NewButton("Создать", func() {
+		notes := readNotes()
+		i := getMaxID(notes)
+		i++
+		countOfMinutes, _ := strconv.Atoi(deadlineEntry.Text)
+		newNote := createNote(i, textEntry.Text, false, time.Now(), time.Now().Add(time.Minute*time.Duration(countOfMinutes)))
+
+		writeNote(&newNote)
+
+		sticker := newSticker(cb.app, newNote, "note1.png", rand.Float32()*700, rand.Float32()*400)
+		noteContainer.Add(sticker)
+		noteContainer.Refresh()
+
+		wToCreateNote.Close()
+	})
+
+	atCreate := container.NewVBox(textEntry, deadlineEntry, create)
+
+	wToCreateNote.SetContent(container.NewMax(bg, atCreate))
+	wToCreateNote.Show()
+}
+
+func (cb *CreateButton) Tapped(ev *fyne.PointEvent) {
+	if cb.onTapped != nil {
+		cb.onTapped()
+	}
+
+	openCreateNoteWindow(cb, cb.noteContainer)
 }
 
 func (s *Sticker) Tapped(ev *fyne.PointEvent) {
@@ -53,6 +121,10 @@ func (s *Sticker) Tapped(ev *fyne.PointEvent) {
 		ww.SetContent(container.NewMax(bg))
 		ww.Show()
 	})
+}
+
+func (cb *CreateButton) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(cb.Image)
 }
 
 func (s *Sticker) CreateRenderer() fyne.WidgetRenderer {
@@ -86,6 +158,11 @@ func (s *Sticker) Dragged(ev *fyne.DragEvent) {
 
 	s.X = newPos.X
 	s.Y = newPos.Y
+
+	if s.X > 600 && s.Y > 320 {
+		s.Hide()
+		deleteNote(s.Note.ID)
+	}
 }
 
 func (s *Sticker) animateDrag() {
@@ -127,6 +204,11 @@ func gui() {
 	bg := canvas.NewImageFromFile("desk.jpg")
 	bg.FillMode = canvas.ImageFillStretch
 
+	trashCan := canvas.NewImageFromFile("trash.png")
+	trashCan.FillMode = canvas.ImageFillContain
+	trashCan.Resize(fyne.NewSize(80, 80))
+	trashCan.Move(fyne.NewPos(690, 380))
+
 	stickers := []fyne.CanvasObject{}
 
 	for _, note := range notes {
@@ -136,11 +218,16 @@ func gui() {
 
 	noteContainer := container.NewWithoutLayout(stickers...)
 
+	createButton := newCreateButton(a)
+	createButton.noteContainer = noteContainer
+
+	foreground := container.NewWithoutLayout(trashCan, createButton, noteContainer)
+
 	drv, ok := a.Driver().(desktop.Driver)
 	if ok {
 		w := drv.CreateSplashWindow()
 
-		w.SetContent(container.NewMax(bg, noteContainer))
+		w.SetContent(container.NewMax(bg, foreground))
 
 		w.Resize(fyne.NewSize(800, 500))
 		w.ShowAndRun()
